@@ -1,18 +1,22 @@
 # Imports
 from io import BytesIO, StringIO
+import ast
 from typing import List
 import json
 import requests
+import asyncio
 from PIL import Image as PILImage
 import bs4
 import pandas as pd
 import flask
 import pytesseract
+from pydantic import BaseModel
 
 # Global Variables
 SRM_STUDENT_PORTAL_URI = 'https://sp.srmist.edu.in/srmiststudentportal/students/loginManager/youLogin.jsp'
 SRM_STUDENT_PORTAL_GET_CAPTCHA_URI = 'https://sp.srmist.edu.in/srmiststudentportal/captchas'
 ATTENDENCE_PAGE_URI = 'https://sp.srmist.edu.in/srmiststudentportal/students/report/studentAttendanceDetails.jsp'
+MONTHLY_ATTENDENCE_PAGE_URI = 'https://sp.srmist.edu.in/srmiststudentportal/students/report/studentAttendanceDetailsInner.jsp'
 
 class AttendenceManager:
     """SRM Student Portal Attendence Manager API Interface."""
@@ -61,12 +65,12 @@ class AttendenceManager:
         
         return attendence_page
 
-    def get_attendence_table(self) -> pd.DataFrame:
+    def get_CourseWiseAttendence(self) -> List[dict[str, str | int]]:
         """Get main Attendence Table. """
         attendence_page = self.attendence_page()
         
         # Get Attendence Table
-        attendence_table = attendence_page.find('table', class_='table')
+        attendence_table = attendence_page.findAll('table', class_='table')[0]
         
         # Convert to DataFrame
         attendence_df = pd.read_html(StringIO(str(attendence_table)))[0]
@@ -74,29 +78,58 @@ class AttendenceManager:
         # Remove Unwanted Subject Codes
         blacklist_codes = ['CL', 'Total']
         attendence_df = attendence_df[~attendence_df['Code'].isin(blacklist_codes)]
-        return attendence_df
+        return ast.literal_eval(attendence_df.to_json(index=False, orient='records'))
     
-    def get_absent_details(self) -> List[pd.DataFrame]:
+    def get_MonthlyAttendence(self) -> List[dict[str, str | int]]:
         """Get Absent Details for every month."""
-        pass
+        attendence_page = self.attendence_page()
+        
+        # Get Cumulative Attendence Table
+        cumulative_attendence_table = attendence_page.findAll('table', class_='table')[1]
+        cumulative_attendence_df = pd.read_html(StringIO(str(cumulative_attendence_table)))[0]
+        month_map = {'JAN': 1, 'FEB': 2,'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6, 'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+        
+        daywise_absent_details = []
+        for idx, row in cumulative_attendence_df.iterrows():
+            mon, year = row['Month / Year'].split(' / ')
+            response = self.session.post(
+                MONTHLY_ATTENDENCE_PAGE_URI,
+                data={
+                    'ids': 1, 
+                    'attendanceMonth': month_map[mon],
+                    'attendanceYear': year,
+                },
+            )
+            absent_details = pd.read_html(StringIO(str(response.text)))[0]
+            daywise_absent_details.extend(ast.literal_eval(absent_details.to_json(index=False, orient='records')))
 
+        return daywise_absent_details
+class User(BaseModel):
+    """User."""
+    username: str = ''
+    password: str = ''
+
+    def check_username_password(self) -> str | None:
+        """Check Username and Password."""
+        if not self.username:
+            return 'username is required form parameter'
+
+        if not self.password:
+            return 'password is required form parameter'
 
 app = flask.Flask(__name__)
 
-@app.route('/get_attendence', methods=['POST'])
+@app.route('/get_attendence_details', methods=['POST'])
 def get_attendence():
     """Get Attendence."""
-    # Get Username and Password
-    username = flask.request.form.get('username')
-    if not username:
-        return flask.Response(json.dumps({'error': 'username is required form parameter', 'data': ''}), status=400, mimetype='application/json')
-
-    password = flask.request.form.get('password')
-    if not password:
-        return flask.Response(json.dumps({'error': 'password is required form parameter', 'data': ''}), status=400, mimetype='application/json')
-
+    # Check Username and Password
+    user = User(**flask.request.form)
+    err_msg = user.check_username_password()
+    if err_msg:
+        return flask.Response(json.dumps({'error': err_msg, 'data': ''}), status=400, mimetype='application/json')
+    
     # Create Attendence Manager Instance
-    attendence_manager = AttendenceManager(username, password)
+    attendence_manager = AttendenceManager(user.username, user.password)
 
     # Login
     try:
@@ -105,14 +138,19 @@ def get_attendence():
         return flask.Response(json.dumps({'error': str(e), 'data': ''}), status=401, mimetype='application/json')
 
     # Get Attendence Table
-    attendence_df = attendence_manager.get_attendence_table()
+    CourseWiseAttendence = attendence_manager.get_CourseWiseAttendence()
 
-    return flask.Response(json.dumps({'data': attendence_df.to_json()}), status=200, mimetype='application/json')
+    # Get Monthly Absent Hours
+    MonthlyAbsentHours = attendence_manager.get_MonthlyAttendence()
+    return flask.Response(
+        json.dumps(
+            {
+                'CourseWiseAttendence': CourseWiseAttendence,
+                'MonthlyAttendence': MonthlyAbsentHours,
+                }
+            ), status=200, mimetype='application/json')
 
-@app.route('/get_attendence', methods=['GET'])
+@app.route('/get_attendence_details', methods=['GET'])
 def error():
     """GET request not allowed."""
     return flask.Response(json.dumps({'error': 'GET request not allowed', 'data': ''}), status=405, mimetype='application/json')
-
-# if __name__ == '__main__':
-#     app.run(debug=True, port=5000)

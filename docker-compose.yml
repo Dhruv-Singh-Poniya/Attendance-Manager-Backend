@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  app:
+    container_name: attendance-manager-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=development
+    command: flask run --host=0.0.0.0 --port=5000

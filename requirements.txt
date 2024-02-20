@@ -1,0 +1,7 @@
+bs4
+pytesseract
+flask
+requests
+pandas
+pyarrow
+lxml

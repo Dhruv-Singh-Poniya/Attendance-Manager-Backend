@@ -26,14 +26,14 @@ class AttendenceManager:
     
     def login(self) -> None:
         """Login to SRM Student Portal."""
-        
+
         # Make GET request to SRM Student Portal
         self.session.get(SRM_STUDENT_PORTAL_URI, headers=self.headers)
-        
+
         # Get Captcha
         capcha_bin = self.session.get(SRM_STUDENT_PORTAL_GET_CAPTCHA_URI, headers=self.headers).content
         capcha_text = pytesseract.image_to_string(PILImage.open(BytesIO(capcha_bin))).strip()
-        
+
         # Login
         data = {
             'txtPageAction': '1',
@@ -42,15 +42,15 @@ class AttendenceManager:
             'hdnCaptcha': capcha_text,
         }
         response = self.session.post(SRM_STUDENT_PORTAL_URI, data=data)
-        
+
         # Check for Login Error
         if response.text.find('Login Error : Invalid net id or password') != -1:
             raise ValueError('Invalid Username or Password')
-        
+
         # Check for Captcha Error, If so then try again
         if response.text.find('Invalid Captcha....') != -1:
             self.login()
-        
+
     def attendence_page(self) -> bs4.BeautifulSoup:
         """Get Attendence Page."""
         # Make GET request to Attendence Page
@@ -114,5 +114,5 @@ def error():
     """GET request not allowed."""
     return flask.Response(json.dumps({'error': 'GET request not allowed', 'data': ''}), status=405, mimetype='application/json')
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+# if __name__ == '__main__':
+#     app.run(debug=True, port=5000)

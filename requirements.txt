@@ -1,7 +1,11 @@
 bs4
 pytesseract
-flask
+fastapi
 requests
 pandas
-pyarrow
 lxml
+uvicorn
+httpx
+psycopg2-binary
+python-dotenv
+schedule

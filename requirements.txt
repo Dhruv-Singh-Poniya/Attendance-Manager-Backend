@@ -7,5 +7,6 @@ lxml
 uvicorn
 httpx
 psycopg2-binary
+pymongo
 python-dotenv
 schedule

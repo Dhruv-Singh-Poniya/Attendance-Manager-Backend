@@ -1,11 +1,13 @@
-from fastapi import FastAPI, Form, HTTPException
-from pydantic import BaseModel
-from utils.database import Database
+"""Main File for FastAPI SRM Student Portal Attendance Manager API."""
 import asyncio
 from contextlib import asynccontextmanager
 import datetime
+from fastapi import FastAPI, Form, HTTPException
+from utils.database import Database
 from utils.update_attendence_database import update_attendence_database
 from utils.attendance_manager import AttendanceManager
+from utils.data_models import User
+from utils.notifications import Notifications
 
 async def update_attendence():
     """Update Attendence Database."""
@@ -14,11 +16,15 @@ async def update_attendence():
         users = db.get_all_users()
         tasks = []
         for username, password in users:
-            tasks.append(update_attendence_database(username, password, AttendanceManager, db.cursor, db.conn))
+            tasks.append(
+                update_attendence_database(username, password, AttendanceManager, db.cursor, db.conn)
+            )
 
         result = await asyncio.gather(*tasks)
         print('Today:', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        for r in result: print(r)
+        for r in result:
+            print(r)
+        del db
         await asyncio.sleep(1000)
 
 # Schedule the update_attendence_database function to run every 10min for each user
@@ -37,27 +43,6 @@ app = FastAPI(
     redoc_url=None,
     lifespan=update_attendence_lifespan,
 )
-
-class User(BaseModel):
-    """User model for authentication."""
-    username: str = ''
-    password: str = ''
-
-    def check_username_password(self) -> str | None:
-        """Check Username and Password."""
-        # required checks
-        if not self.username:
-            return 'username is required form parameter'
-        if not self.password:
-            return 'password is required form parameter'
-        
-        # length checks
-        if len(self.username) != 6:
-            return 'username should be of 6 characters'
-        if len(self.password) > 64:
-            return 'Sorry, password is too long for our database (max 64 characters allowed)'
-        
-        return None
 
 @app.post('/get_attendance_details')
 async def get_attendance(username: str = Form(default=''), password: str = Form(default='')):
@@ -120,10 +105,10 @@ async def register_user(username: str = Form(default=''), password: str = Form(d
     err_msg = user.check_username_password()
     if err_msg:
         raise HTTPException(status_code=400, detail=err_msg)
-    
+
     # Create Attendance Manager Instance
     attendance_manager = AttendanceManager(user.username, user.password)
-    
+
     # Try to Login to check if the credentials are valid
     try:
         await attendance_manager.login()
@@ -146,6 +131,22 @@ async def unregister_user(username: str = Form(default='')):
     db = Database()
     status=db.remove_user(username)
     return status
+
+@app.post('/notifications')
+async def get_notifications(username: str = Form(default='')):
+    """Get Notifications."""
+    # Check Username
+    if not username:
+        raise HTTPException(status_code=400, detail='username is required form parameter')
+    
+    # Check if User Exists in Database
+    db = Database()
+    if username not in [user for user, _ in db.get_all_users()]:
+        raise HTTPException(status_code=400, detail=f'{username}: User Not registered for Notifications')
+        
+    # Retrieve Notifications
+    notifications = Notifications().retrieve_notifications(username)
+    return {'status': 'success', 'notifications': notifications}
 
 if __name__ == '__main__':
     import uvicorn
